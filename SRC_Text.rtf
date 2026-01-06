@@ -1,0 +1,393 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2818
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 === /Users/jeremiah/Documents/CoolingAISImFinal/src/__init__.py ===\
+# (empty or package init)\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/control/ai_controller.py ===\
+from src.physics.rack import (\
+    CP_LIQ, CP_AIR, DT_LIQ, \
+    MDOT_LIQ_MAX, MDOT_AIR_MAX\
+)\
+\
+class AIController:\
+    def decide(self, T_rack, Q_IT, wind_share, price, ambient_temp):\
+        Q_ancillary = 6.0 \
+        Q_high_power = max(0, Q_IT - Q_ancillary)\
+\
+        MAX_EXHAUST_TEMP = 45.0\
+        available_dt_air = max(5.0, MAX_EXHAUST_TEMP - ambient_temp)\
+        mdot_air_min = Q_ancillary / (CP_AIR * available_dt_air)\
+        \
+        IS_PRICE_SPIKE = (price > 0.35)\
+\
+        target_temp = 20.0 + ((Q_IT / 80.0) * 6.0)\
+        target_temp = max(18.0, min(target_temp, 26.0))\
+\
+        high_load_factor = 1.0 + (max(0, Q_IT - 50.0) / 100.0) \
+\
+        if Q_IT < 30.0:\
+            low_load_boost = 1.5\
+        else:\
+            low_load_boost = 1.0\
+\
+        if T_rack > target_temp + 0.5:\
+            temp_mod = 1.20  # Stronger reaction to rising temp\
+        elif T_rack < target_temp - 0.5:\
+            temp_mod = 0.90\
+        else:\
+            temp_mod = (0.95 if IS_PRICE_SPIKE else 1.0)\
+\
+        # Calculate base thermal requirement\
+        Q_high_power_target = Q_high_power * high_load_factor * low_load_boost * temp_mod\
+\
+        # --- Calculate Liquid Flow ---\
+        if IS_PRICE_SPIKE:\
+            mdot_liq = Q_high_power_target / (CP_LIQ * DT_LIQ)\
+            mdot_air = mdot_air_min\
+        elif wind_share < 0.5:\
+            mdot_liq = (Q_high_power_target * 0.8) / (CP_LIQ * DT_LIQ)\
+            extra_air_q = Q_high_power_target * 0.2\
+            mdot_air = mdot_air_min + (extra_air_q / (CP_AIR * available_dt_air))\
+        else:\
+            mdot_liq = Q_high_power_target / (CP_LIQ * DT_LIQ)\
+            mdot_air = mdot_air_min\
+        \
+\
+        MIN_FLOW_LIQ = MDOT_LIQ_MAX * 0.25\
+        \
+        mdot_liq = max(MIN_FLOW_LIQ, min(mdot_liq, MDOT_LIQ_MAX))\
+        mdot_air = max(0, min(mdot_air, MDOT_AIR_MAX))\
+\
+        return mdot_liq, mdot_air\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/control/rule_engine.py ===\
+def priority_rules():\
+    return \{\
+        "temp_band": (24, 26),\
+        "prefer_liquid_when_wind_high": True,\
+        "minimise_flow": True\
+    \}\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/physics/rack.py ===\
+# Updated constants \
+CP_LIQ = 3.875     # kJ/kgK (Water/30% Propylene Glycol) \
+CP_AIR = 1.005     # kJ/kgK \
+\
+DT_LIQ = 5.0       # \'b0C (Fixed rise for liquid loop) \
+\
+# Max flow rates \
+MDOT_LIQ_MAX = 2.466   # kg/s \
+MDOT_AIR_MAX = 0.272   # kg/s\
+\
+# Thermal capacitance\
+# lowered for responsiveness\
+C_TH = 500.0        # kJ/\'b0C \
+DT = 1.0           # seconds\
+\
+class Rack:\
+    def __init__(self, T_init=25.0):\
+        self.T = T_init\
+\
+    def step(self, Q_IT, mdot_liq, mdot_air, ambient_temp):\
+        Q_liq = mdot_liq * CP_LIQ * DT_LIQ\
+\
+        actual_dt_air = max(0, self.T - ambient_temp)\
+        Q_air = mdot_air * CP_AIR * actual_dt_air\
+\
+        Q_cool_total = Q_liq + Q_air\
+\
+        dTdt = (Q_IT - Q_cool_total) / C_TH\
+        self.T += dTdt * DT\
+\
+        return \{\
+            "T_rack": self.T,\
+            "Q_liq": Q_liq,\
+            "Q_air": Q_air,\
+            "Q_cool_total": Q_cool_total\
+        \}\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/physics/coolant.py ===\
+# Placeholder for more advanced coolant models\
+\
+def coolant_inlet_temperature():\
+    return 20.0  # \'b0C constant for now\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/physics/utils.py ===\
+def clamp(value, low, high):\
+    return max(low, min(value, high))\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/physics/crah.py ===\
+# Placeholder for CRAH air handling model\
+\
+def crah_inlet_temperature(ambient_temp):\
+    return ambient_temp\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/scenario/events.py ===\
+def it_spike(current_Q, amount=10):\
+    return current_Q + amount\
+\
+def cold_weather_event():\
+    return 5.0   # \'b0C\
+\
+def price_spike(current_price, factor=2.0):\
+    return current_price * factor\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/scenario/profiles.py ===\
+def base_IT_profile(t):\
+    return 50.0  # kW constant load for now\
+\
+def base_weather_profile(t):\
+    return 18.0  # \'b0C constant for now\
+\
+def base_price_profile(t):\
+    return 0.20  # \'a3/kWh\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/scenario/scenario_manager.py ===\
+from src.scenario import profiles\
+\
+class ScenarioManager:\
+    def __init__(self):\
+        self.Q_IT = 50.0\
+        self.ambient = 18.0\
+        self.price = 0.2\
+        self.adjusted_price = 0.2\
+        self.wind_share = 0.8\
+\
+    def update(self, t):\
+        self.Q_IT = profiles.base_IT_profile(t)\
+        self.ambient = profiles.base_weather_profile(t)\
+        self.price = profiles.base_price_profile(t)\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/simulation/config.py ===\
+SIM_DURATION = 300  # seconds\
+DT = 1.0\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/simulation/loop.py ===\
+from src.physics.rack import Rack\
+from src.control.ai_controller import AIController\
+from src.scenario.scenario_manager import ScenarioManager\
+from src.simulation.logger import Logger\
+from src.simulation.config import SIM_DURATION\
+\
+def run_simulation_simple():\
+\
+    rack = Rack()\
+    ai = AIController()\
+    scenario = ScenarioManager()\
+    logger = Logger()\
+\
+    for t in range(SIM_DURATION):\
+\
+        scenario.update(t)\
+\
+        mdot_liq, mdot_air = ai.decide(\
+            T_rack=rack.T,\
+            Q_IT=scenario.Q_IT,\
+            wind_share=scenario.wind_share,\
+            price=scenario.price,\
+            ambient_temp=scenario.ambient\
+        )\
+\
+        state = rack.step(\
+            Q_IT=scenario.Q_IT,\
+            mdot_liq=mdot_liq,\
+            mdot_air=mdot_air\
+        )\
+\
+        logger.log(t, scenario.Q_IT, mdot_liq, mdot_air, state["T_rack"])\
+\
+    return logger.get()\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/simulation/logger.py ===\
+class Logger:\
+    def __init__(self):\
+        self.data = []\
+\
+    def log(self, t, Q_IT, mdot_liq, mdot_air, T_rack):\
+        self.data.append((t, Q_IT, mdot_liq, mdot_air, T_rack))\
+\
+    def get(self):\
+        return self.data\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/ui/components.py ===\
+# UI helper functions will go here later\
+\
+=== /Users/jeremiah/Documents/CoolingAISImFinal/src/ui/dashboard.py ===\
+import streamlit as st\
+\
+#model saftey\
+try:\
+    from src.physics.rack import Rack\
+    from src.control.ai_controller import AIController\
+except Exception as e:\
+    # If imports fail, show the error instead of a black screen\
+    st.set_page_config(page_title="AI Cooling Dashboard - Import Error", layout="wide")\
+    st.title("\uc0\u10060  Import error in dashboard.py")\
+    st.write("I couldn't import Rack or AIController. Check your src/ structure.")\
+    st.exception(e)\
+    st.stop()\
+\
+\
+#  Session helpers \
+\
+def init_state():\
+    """Initialise all simulation state the first time the app runs."""\
+    if "initialised" in st.session_state:\
+        return\
+\
+    st.session_state.rack = Rack(T_init=25.0)\
+    st.session_state.ai = AIController()\
+\
+    st.session_state.t = 0  # time in seconds\
+\
+    # Scenario variables\
+    st.session_state.Q_IT = 50.0          # kW\
+    st.session_state.ambient = 18.0       # \'b0C\
+    st.session_state.price_standard = 0.20      # \'80/kWh\
+    st.session_state.price_adjusted = 0.20      # \'80/kWh \
+    st.session_state.wind_share = 0.8     # fraction 0\'961\
+\
+    # results hisotry\
+    st.session_state.history = []\
+\
+    st.session_state.initialised = True\
+\
+\
+def step_simulation(n_steps: int = 1):\
+    """advance the simulation forward n_steps seconds."""\
+    rack = st.session_state.rack\
+    ai = st.session_state.ai\
+\
+    for _ in range(n_steps):\
+        mdot_liq, mdot_air = ai.decide(\
+            T_rack=rack.T,\
+            Q_IT=st.session_state.Q_IT,\
+            wind_share=st.session_state.wind_share,\
+            price=st.session_state.price_adjusted,\
+            ambient_temp=st.session_state.ambient,\
+        )\
+\
+        state = rack.step(\
+            Q_IT=st.session_state.Q_IT,\
+            mdot_liq=mdot_liq,\
+            mdot_air=mdot_air,\
+            ambient_temp=st.session_state.ambient,  \
+        )\
+\
+        st.session_state.t += 1\
+\
+        st.session_state.t += 1\
+\
+        # Log one row of history\
+        st.session_state.history.append(\
+            \{\
+                "t": st.session_state.t,\
+                "T_rack": round(state["T_rack"], 3),\
+                "Q_IT": st.session_state.Q_IT,\
+                "mdot_liq": round(mdot_liq, 4),\
+                "mdot_air": round(mdot_air, 4),\
+                "price_standard": st.session_state.price_standard,\
+                "price_adjusted": st.session_state.price_adjusted,\
+                "ambient": st.session_state.ambient,\
+                "wind_share": st.session_state.wind_share,\
+            \}\
+        )\
+\
+\
+# Main GUI------------------------------------------------------------------------------\
+\
+def main():\
+    st.set_page_config(page_title="AI Cooling Control Dashboard", layout="wide")\
+    init_state()\
+\
+    # Clean styling for metrics\
+    st.markdown("""<style>div[data-testid="stMetric"] \{border: 1px solid rgba(49, 51, 63, 0.1); border-radius: 0.5rem; padding: 1rem;\}</style>""", unsafe_allow_html=True)\
+\
+    st.title("AI Data Centre Cooling \'96 Control Dashboard")\
+\
+    # --- SIDEBAR ---\
+    with st.sidebar:\
+        st.header("Simulation Control")\
+        step_size = st.selectbox("Step Size (seconds)", options=[1, 5, 10, 30], index=1)\
+        if st.button("\uc0\u9654  Step Simulation", key="step_btn", use_container_width=True):\
+            step_simulation(n_steps=int(step_size))\
+\
+        st.markdown("---")\
+        with st.expander("\uc0\u55356 \u57121 \u65039  Environmental Factors", expanded=True):\
+            st.session_state.Q_IT = st.slider("Total Rack Thermal Load (kW)", 10.0, 100.0, float(st.session_state.Q_IT))\
+            st.session_state.ambient = st.slider("Ambient Temperature (\'b0C)", -5.0, 40.0, float(st.session_state.ambient))\
+            st.session_state.wind_share = st.slider("Renewable Wind Share", 0.0, 1.0, float(st.session_state.wind_share))\
+\
+        with st.expander("\uc0\u55357 \u56504  Economic Factors"):\
+            st.session_state.price_standard = st.slider("Standard Grid Price (\'80/kWh)", 0.05, 0.80, float(st.session_state.price_standard))\
+            st.session_state.price_adjusted = st.slider("Test Price (\'80/kWh)", 0.05, 1.00, float(st.session_state.price_adjusted))\
+\
+        st.markdown("---")\
+        st.subheader("Quick Disturbances")\
+        c1, c2 = st.columns(2)\
+        with c1:\
+            if st.button("IT +10 kW", key="spike_it"): st.session_state.Q_IT += 10.0\
+        with c2:\
+            if st.button("Set Amb 5\'b0C", key="set_cold"): st.session_state.ambient = 5.0\
+        \
+        if st.button("Reset All Data", key="reset_btn", use_container_width=True):\
+            for key in list(st.session_state.keys()): del st.session_state[key]\
+            init_state()\
+            st.rerun()\
+\
+    # --- DYNAMIC STATUS BANNER ---\
+    curr_t = st.session_state.rack.T\
+    curr_p = st.session_state.price_adjusted\
+    if curr_t > 26.0:\
+        st.warning(f"\uc0\u9888 \u65039  High Thermal Load (\{curr_t:.2f\}\'b0C): AI Increasing Cooling Response.")\
+    elif curr_p > 0.35:\
+        st.info(f"\uc0\u9851 \u65039  Energy Recovery Mode: AI Throttling cooling power to optimize costs (\'80\{curr_p:.2f\}/kWh).")\
+    elif 24.0 <= curr_t <= 26.0:\
+        st.success("\uc0\u9989  Nominal Operation: System running within optimized thermal band (24-26\'b0C).")\
+    else:\
+        st.info("\uc0\u10052 \u65039  Optimization Active: AI reducing flow to return to target 25\'b0C range.")\
+\
+    # --- KPI METRICS ---\
+    col1, col2, col3 = st.columns(3)\
+    with col1:\
+        st.subheader("Thermal State")\
+        st.metric("T_cpu (\'b0C)", f"\{curr_t:.2f\}", delta=f"\{curr_t - 25.0:.2f\} vs Target", delta_color="inverse")\
+    with col2:\
+        st.subheader("Cooling Flows (kg/s)")\
+        if st.session_state.history:\
+            last = st.session_state.history[-1]\
+            st.metric("Liquid (GPU/CPU)", f"\{last['mdot_liq']:.4f\}")\
+            st.metric("Air (Ancillary)", f"\{last['mdot_air']:.4f\}")\
+    with col3:\
+        st.subheader("External Conditions")\
+        status = "SUSTAINABLE" if st.session_state.wind_share > 0.5 else "GRID-HEAVY"\
+        st.metric("Grid Status", status, delta=f"\{st.session_state.wind_share*100:.0f\}% Wind")\
+\
+    st.markdown("---")\
+\
+    # --- ANALYSIS CHARTS ---\
+    if st.session_state.history:\
+        st.subheader("\uc0\u55357 \u56522  Thermal Performance & Cooling Response")\
+        h = st.session_state.history\
+        chart_data = \{\
+            "Time (s)": [x["t"] for x in h],\
+            "Rack Temp (\'b0C)": [x["T_rack"] for x in h],\
+            "IT Load (kW)": [x["Q_IT"] for x in h],\
+            "Liquid Flow (kg/s)": [x["mdot_liq"] for x in h],\
+            "Air Flow (kg/s)": [x["mdot_air"] for x in h]\
+        \}\
+        pc1, pc2 = st.columns(2)\
+        with pc1: st.line_chart(data=chart_data, x="Time (s)", y=["Rack Temp (\'b0C)", "IT Load (kW)"])\
+        with pc2: st.line_chart(data=chart_data, x="Time (s)", y=["Liquid Flow (kg/s)", "Air Flow (kg/s)"])\
+\
+    # --- TELEMETRY LOG ---\
+    with st.expander("\uc0\u55357 \u56540  View Raw Telemetry History"):\
+        if st.session_state.history: st.table(st.session_state.history[-15:])\
+\
+if __name__ == "__main__":\
+    main()}
