@@ -36,21 +36,4 @@ To run the simulation, execute the main entry point:
 python src/main.py
 ```
 
-## Logger Class
-The project includes a `Logger` class located in `src/simulation/logger.py`. This class is responsible for logging simulation data. It has the following methods:
-- `__init__`: Initializes an empty list to store log data.
-- `log(t, Q_IT, mdot_liq, mdot_air, T_rack)`: Logs the provided parameters as a tuple.
-- `get()`: Returns the list of logged data.
 
-## Testing
-Unit tests for the Logger class are located in `tests/test_logger.py`. To run the tests, use:
-
-```
-pytest tests/test_logger.py
-```
-
-## Contributing
-Contributions are welcome! Please submit a pull request or open an issue for any enhancements or bug fixes.
-
-## License
-This project is licensed under the MIT License. See the LICENSE file for details.
